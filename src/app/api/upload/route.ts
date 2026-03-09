@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { v4 as uuidv4 } from 'uuid';
 
+export const maxDuration = 60; // Maximum duration in seconds
+export const dynamic = 'force-dynamic'; // Ensure dynamic execution
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -24,9 +27,9 @@ export async function POST(request: NextRequest) {
 
     // Map bucket names to actual Supabase bucket names
     const bucketMap: Record<string, string> = {
-      'bills': 'medical-bills',        // Map 'bills' to 'medical-bills'
-      'room-photos': 'room-photos',     // Keep as is
-      'medical-bills': 'medical-bills'  // Allow direct use too
+      'bills': 'medical-bills',
+      'room-photos': 'room-photos',
+      'medical-bills': 'medical-bills'
     };
 
     const actualBucket = bucketMap[bucket] || bucket;
@@ -83,7 +86,6 @@ export async function POST(request: NextRequest) {
     if (uploadError) {
       console.error('Upload error:', uploadError);
       
-      // Provide more helpful error messages
       if (uploadError.message.includes('Bucket not found')) {
         return NextResponse.json(
           { error: `Bucket '${actualBucket}' not found. Please create it in Supabase dashboard.` },

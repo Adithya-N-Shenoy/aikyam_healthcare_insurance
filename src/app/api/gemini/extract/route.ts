@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { geminiClient } from '@/lib/gemini/client';
 
+// Increase body size limit using the new Next.js 14 format
+export const maxDuration = 60; // Maximum duration in seconds
+export const dynamic = 'force-dynamic'; // Ensure dynamic execution
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -88,12 +92,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-// Increase limit for file uploads
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '20mb',
-    },
-  },
-};

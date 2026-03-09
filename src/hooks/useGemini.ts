@@ -43,8 +43,16 @@ export function useGemini() {
 
       return data;
     } catch (err: any) {
-      setError(err.message);
-      toast.error(`Extraction failed: ${err.message}`);
+      // Handle unknown error type
+      let errorMessage = 'Unknown error occurred';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      }
+      
+      setError(errorMessage);
+      toast.error(`Extraction failed: ${errorMessage}`);
       throw err;
     } finally {
       setIsLoading(false);

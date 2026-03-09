@@ -37,7 +37,6 @@ export class GeminiClient {
     try {
       console.log('📤 Sending to Gemini for extraction...');
       
-      // Prepare prompt for medical bill extraction
       const prompt = `
         You are a medical bill extraction expert. Extract the following information from this hospital bill/image:
         
@@ -83,13 +82,8 @@ export class GeminiClient {
           "totalAmount": number,
           "rawText": "string"
         }
-        
-        If any field is not found, use null.
-        Ensure amounts are numbers (remove ₹, commas).
-        Be precise and accurate.
       `;
       
-      // Prepare the file for Gemini
       const filePart = {
         inlineData: {
           data: fileBuffer.toString('base64'),
@@ -97,14 +91,12 @@ export class GeminiClient {
         }
       };
       
-      // Generate content
       const result = await model.generateContent([prompt, filePart]);
       const response = await result.response;
       const text = response.text();
       
       console.log('✅ Gemini response received');
       
-      // Parse JSON from response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in Gemini response');
@@ -112,12 +104,10 @@ export class GeminiClient {
       
       const extractedData = JSON.parse(jsonMatch[0]);
       
-      // Validate structure
       if (!extractedData.items || !Array.isArray(extractedData.items)) {
         extractedData.items = [];
       }
       
-      // Map to medical fields
       const mappedFields = this.mapToMedicalFields(extractedData);
       extractedData.mappedFields = mappedFields;
       
@@ -125,7 +115,19 @@ export class GeminiClient {
       
     } catch (error) {
       console.error('❌ Gemini extraction error:', error);
-      throw new Error(`Failed to extract bill data: ${error.message}`);
+      
+      // Properly handle unknown error type
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error && typeof error === 'object' && 'message' in error) {
+        errorMessage = String((error as any).message);
+      }
+      
+      throw new Error(`Failed to extract bill data: ${errorMessage}`);
     }
   }
   
@@ -133,7 +135,6 @@ export class GeminiClient {
     try {
       const mappedFields: Record<string, number> = {};
       
-      // Map each extracted item to our medical fields
       for (const item of extractedData.items || []) {
         const fieldName = this.mapDescriptionToField(item.description, item.category);
         if (fieldName) {
@@ -145,6 +146,14 @@ export class GeminiClient {
       
     } catch (error) {
       console.error('❌ Field mapping error:', error);
+      
+      // Handle unknown error type
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      console.error('Field mapping error details:', errorMessage);
+      
       return {};
     }
   }

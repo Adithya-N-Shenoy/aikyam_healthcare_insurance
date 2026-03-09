@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FileUpload } from '@/components/common/FileUpload';
+import FileUpload from '@/components/common/FileUpload'; // Change this line
 import { useGemini } from '@/hooks/useGemini';
 import { Loader2, FileText } from 'lucide-react';
 import type { MedicalChargeItem } from '@/types/claim';
@@ -11,7 +11,7 @@ interface BillUploaderProps {
   onFileSelected: (file: File) => void;
 }
 
-export function BillUploader({ onExtracted, onFileSelected }: BillUploaderProps) {
+export default function BillUploader({ onExtracted, onFileSelected }: BillUploaderProps) {
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const { extractBillData } = useGemini();
@@ -28,8 +28,6 @@ export function BillUploader({ onExtracted, onFileSelected }: BillUploaderProps)
       const charges: MedicalChargeItem[] = [];
       if (result.mappedFields) {
         Object.entries(result.mappedFields).forEach(([fieldName, amount]) => {
-          // Find category and subcategory for this field
-          // This would need proper mapping logic
           charges.push({
             fieldName,
             requestedAmount: amount as number,
