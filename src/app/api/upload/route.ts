@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
-import { v4 as uuidv4 } from 'uuid';
+import { put } from '@vercel/blob';
 
-export const maxDuration = 60; // Maximum duration in seconds
-export const dynamic = 'force-dynamic'; // Ensure dynamic execution
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,34 +10,9 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File;
     const bucket = formData.get('bucket') as string;
 
-    if (!file) {
+    if (!file || !bucket) {
       return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
-    }
-
-    if (!bucket) {
-      return NextResponse.json(
-        { error: 'No bucket specified' },
-        { status: 400 }
-      );
-    }
-
-    // Map bucket names to actual Supabase bucket names
-    const bucketMap: Record<string, string> = {
-      'bills': 'medical-bills',
-      'room-photos': 'room-photos',
-      'medical-bills': 'medical-bills'
-    };
-
-    const actualBucket = bucketMap[bucket] || bucket;
-
-    // Validate that the bucket exists in our allowed list
-    const allowedBuckets = ['medical-bills', 'room-photos'];
-    if (!allowedBuckets.includes(actualBucket)) {
-      return NextResponse.json(
-        { error: `Invalid bucket: ${bucket}. Allowed buckets: medical-bills, room-photos` },
+        { error: 'Missing file or bucket' },
         { status: 400 }
       );
     }
@@ -60,56 +34,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('Creating Supabase client...');
-    const supabase = createServerClient();
-    
-    // Generate unique filename
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${uuidv4()}.${fileExt}`;
-    const filePath = fileName;
+    // Generate unique filename with bucket prefix
+    const timestamp = Date.now();
+    const uniqueSuffix = `${timestamp}-${Math.random().toString(36).substring(7)}`;
+    const fileName = `${bucket}/${uniqueSuffix}-${file.name}`;
 
-    // Convert file to buffer
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    console.log(`📤 Uploading to Vercel Blob: ${fileName}`);
 
-    console.log(`Uploading to bucket: ${actualBucket}, path: ${filePath}`);
+    // Upload to Vercel Blob
+    const blob = await put(fileName, file, {
+      access: 'public', // Public access for bills and room photos
+      addRandomSuffix: false, // We already added our own suffix
+    });
 
-    // Upload to Supabase Storage
-    const { data, error: uploadError } = await supabase.storage
-      .from(actualBucket)
-      .upload(filePath, buffer, {
-        contentType: file.type,
-        cacheControl: '3600',
-        upsert: false
-      });
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      
-      if (uploadError.message.includes('Bucket not found')) {
-        return NextResponse.json(
-          { error: `Bucket '${actualBucket}' not found. Please create it in Supabase dashboard.` },
-          { status: 404 }
-        );
-      }
-      
-      return NextResponse.json(
-        { error: `Upload failed: ${uploadError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from(actualBucket)
-      .getPublicUrl(filePath);
-
-    console.log('Upload successful, public URL:', publicUrl);
+    console.log('✅ Upload successful:', blob.url);
 
     return NextResponse.json({
       success: true,
-      filePath: data.path,
-      publicUrl
+      filePath: blob.pathname,
+      publicUrl: blob.url,
+      blob
     });
 
   } catch (error: any) {

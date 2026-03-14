@@ -1,60 +1,48 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  })
+// List of public paths that don't require authentication
+const publicPaths = [
+  '/login',
+  '/register',
+  '/register/agent',
+  '/register/patient',
+  '/register/hospital',
+  '/',
+  '/api/upload',
+  '/api/gemini/extract'
+];
 
-  try {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
-          set(name: string, value: string, options: CookieOptions) {
-            response.cookies.set({
-              name,
-              value,
-              ...options,
-            })
-          },
-          remove(name: string, options: CookieOptions) {
-            response.cookies.set({
-              name,
-              value: '',
-              ...options,
-            })
-          },
-        },
-      }
-    )
-
-    // Refresh session if expired
-    await supabase.auth.getSession()
-  } catch (error) {
-    console.error('Middleware error:', error)
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  
+  // Allow public paths
+  if (publicPaths.some(path => pathname.startsWith(path))) {
+    return NextResponse.next();
   }
 
-  return response
+  // Check for auth token in cookies (you can customize this based on your Firebase setup)
+  const session = request.cookies.get('session')?.value;
+  
+  if (!session && !pathname.startsWith('/api')) {
+    // Redirect to login if no session and not an API route
+    const url = new URL('/login', request.url);
+    url.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
+     * Match all request paths except:
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public (public files)
-     * - api (API routes)
+     * - public folder
      */
-    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
+    '/((?!_next/static|_next/image|favicon.ico|public).*)',
   ],
-}
+};

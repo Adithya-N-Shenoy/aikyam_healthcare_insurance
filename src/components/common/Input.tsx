@@ -5,11 +5,12 @@ import { InputHTMLAttributes, forwardRef, ReactNode } from 'react';
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
+  helperText?: string; // Add this
   icon?: ReactNode;
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, icon, className = '', id, ...props }, ref) => {
+  ({ label, error, helperText, icon, className = '', id, ...props }, ref) => {
     const inputId = id || `input-${Math.random().toString(36).substr(2, 9)}`;
 
     return (
@@ -41,6 +42,9 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
         </div>
+        {helperText && !error && (
+          <p className="mt-1 text-sm text-gray-500">{helperText}</p>
+        )}
         {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
       </div>
     );

@@ -1,63 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { adminDb } from '@/lib/firebase/admin';
+
+export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createServerClient();
-    const { id } = params;
+    const docRef = adminDb.collection('claims').doc(params.id);
+    const docSnap = await docRef.get();
 
-    console.log('Looking up claim with identifier:', id);
-
-    // Build query with all related data
-    let query = supabase
-      .from('claims')
-      .select(`
-        *,
-        insurance_companies (
-          id,
-          name,
-          code
-        ),
-        claim_items (*),
-        document_requests (*),
-        review_notes (
-          *,
-          agents (
-            name,
-            email
-          )
-        ),
-        claim_status_history (*)
-      `);
-
-    // Check if the id is a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (uuidRegex.test(id)) {
-      // It's a UUID, search by id
-      query = query.eq('id', id);
-    } else {
-      // It's a claim number, search by claim_number
-      query = query.eq('claim_number', id);
-    }
-
-    const { data: claim, error } = await query.single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          { error: 'Claim not found' },
-          { status: 404 }
-        );
-      }
-      console.error('Claim fetch error:', error);
+    if (!docSnap.exists) {
       return NextResponse.json(
-        { error: `Failed to fetch claim: ${error.message}` },
-        { status: 500 }
+        { error: 'Claim not found' },
+        { status: 404 }
       );
     }
+
+    // Get claim items
+    const itemsSnap = await docRef.collection('items').get();
+    const items = itemsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Get document requests
+    const docsSnap = await docRef.collection('documentRequests').get();
+    const documents = docsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Get status history
+    const historySnap = await docRef.collection('statusHistory')
+      .orderBy('createdAt', 'desc')
+      .get();
+    const history = historySnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    const claim = {
+      id: docSnap.id,
+      ...docSnap.data(),
+      claim_items: items,
+      document_requests: documents,
+      claim_status_history: history
+    };
 
     return NextResponse.json({
       success: true,
@@ -65,7 +47,7 @@ export async function GET(
     });
 
   } catch (error: any) {
-    console.error('Claim API error:', error);
+    console.error('Claim fetch error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }
@@ -79,84 +61,30 @@ export async function PATCH(
 ) {
   try {
     const body = await request.json();
-    const supabase = createServerClient();
-    const { id } = params;
+    const docRef = adminDb.collection('claims').doc(params.id);
 
-    // First find the claim by either UUID or claim number
-    let claimId = id;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    
-    if (!uuidRegex.test(id)) {
-      // It's a claim number, get the actual UUID
-      const { data: claim } = await supabase
-        .from('claims')
-        .select('id')
-        .eq('claim_number', id)
-        .single();
+    await docRef.update({
+      ...body,
+      updatedAt: new Date().toISOString()
+    });
 
-      if (!claim) {
-        return NextResponse.json(
-          { error: 'Claim not found' },
-          { status: 404 }
-        );
-      }
-      claimId = claim.id;
-    }
-
-    // Update claim
-    const { data: claim, error } = await supabase
-      .from('claims')
-      .update({
-        ...body,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', claimId)
-      .select(`
-        *,
-        insurance_companies (
-          id,
-          name,
-          code
-        ),
-        claim_items (*),
-        document_requests (*),
-        review_notes (
-          *,
-          agents (
-            name,
-            email
-          )
-        ),
-        claim_status_history (*)
-      `)
-      .single();
-
-    if (error) {
-      console.error('Claim update error:', error);
-      return NextResponse.json(
-        { error: `Failed to update claim: ${error.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Create status history if status changed
+    // Add to status history if status changed
     if (body.status) {
-      await supabase
-        .from('claim_status_history')
-        .insert({
-          claim_id: claimId,
-          status: body.status,
-          notes: body.statusNotes || `Status updated to ${body.status}`
-        });
+      await docRef.collection('statusHistory').add({
+        status: body.status,
+        notes: body.statusNotes || `Status updated to ${body.status}`,
+        createdAt: new Date().toISOString()
+      });
     }
 
+    const updatedDoc = await docRef.get();
     return NextResponse.json({
       success: true,
-      claim
+      claim: { id: updatedDoc.id, ...updatedDoc.data() }
     });
 
   } catch (error: any) {
-    console.error('Claim API error:', error);
+    console.error('Claim update error:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }

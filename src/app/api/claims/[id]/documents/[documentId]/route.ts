@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { adminDb } from '@/lib/firebase/admin';
+
+export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 export async function PATCH(
   request: NextRequest,
@@ -7,86 +10,23 @@ export async function PATCH(
 ) {
   try {
     const body = await request.json();
-    const supabase = createServerClient();
+    const { id, documentId } = params;
 
-    // Get the claim ID (handle both UUID and claim number)
-    let claimId = params.id;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    
-    if (!uuidRegex.test(params.id)) {
-      const { data: claim, error: claimError } = await supabase
-        .from('claims')
-        .select('id')
-        .eq('claim_number', params.id)
-        .single();
+    const docRef = adminDb.collection('claims').doc(id)
+      .collection('documentRequests').doc(documentId);
 
-      if (claimError || !claim) {
-        return NextResponse.json(
-          { error: 'Claim not found' },
-          { status: 404 }
-        );
-      }
-      claimId = claim.id;
-    }
-
-    // First check if document exists
-    const { data: existingDoc, error: checkError } = await supabase
-      .from('document_requests')
-      .select('*')
-      .eq('id', params.documentId)
-      .eq('claim_id', claimId)
-      .single();
-
-    if (checkError || !existingDoc) {
-      return NextResponse.json(
-        { error: 'Document not found' },
-        { status: 404 }
-      );
-    }
-
-    // Update document request status
-    const updateData = {
+    await docRef.update({
       status: body.status,
-      updated_at: new Date().toISOString(),
-      reviewed_at: new Date().toISOString(),
-      reviewed_by: body.agentId || null,
-      review_notes: body.notes || null
-    };
+      reviewedAt: new Date().toISOString(),
+      reviewNotes: body.notes,
+      reviewedBy: body.agentId
+    });
 
-    const { error: updateError } = await supabase
-      .from('document_requests')
-      .update(updateData)
-      .eq('id', params.documentId);
-
-    if (updateError) {
-      console.error('Error updating document:', updateError);
-      return NextResponse.json(
-        { error: `Failed to update document status: ${updateError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // Add status history
-    await supabase
-      .from('claim_status_history')
-      .insert({
-        claim_id: claimId,
-        status: `document_${body.status}`,
-        notes: body.notes || `Document ${body.status} by agent`,
-        created_at: new Date().toISOString()
-      });
-
-    // Get updated document
-    const { data: updatedDoc } = await supabase
-      .from('document_requests')
-      .select('*')
-      .eq('id', params.documentId)
-      .single();
-
+    const updated = await docRef.get();
     return NextResponse.json({
       success: true,
       message: `Document ${body.status} successfully`,
-      document: updatedDoc
+      document: { id: updated.id, ...updated.data() }
     });
 
   } catch (error: any) {
@@ -103,37 +43,12 @@ export async function GET(
   { params }: { params: { id: string; documentId: string } }
 ) {
   try {
-    const supabase = createServerClient();
-
-    // Get the claim ID
-    let claimId = params.id;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const docRef = adminDb.collection('claims').doc(params.id)
+      .collection('documentRequests').doc(params.documentId);
     
-    if (!uuidRegex.test(params.id)) {
-      const { data: claim, error: claimError } = await supabase
-        .from('claims')
-        .select('id')
-        .eq('claim_number', params.id)
-        .single();
+    const docSnap = await docRef.get();
 
-      if (claimError || !claim) {
-        return NextResponse.json(
-          { error: 'Claim not found' },
-          { status: 404 }
-        );
-      }
-      claimId = claim.id;
-    }
-
-    const { data: document, error } = await supabase
-      .from('document_requests')
-      .select('*')
-      .eq('id', params.documentId)
-      .eq('claim_id', claimId)
-      .single();
-
-    if (error) {
-      console.error('Error fetching document:', error);
+    if (!docSnap.exists) {
       return NextResponse.json(
         { error: 'Document not found' },
         { status: 404 }
@@ -142,7 +57,7 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      document
+      document: { id: docSnap.id, ...docSnap.data() }
     });
 
   } catch (error: any) {

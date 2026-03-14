@@ -14,6 +14,7 @@ import ClaimItemsReview from '@/components/agent/ClaimItemsReview';
 import ReviewForm from '@/components/agent/ReviewForm';
 import toast from 'react-hot-toast';
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils/formatters';
+import { mapClaimToPolicy } from '@/lib/utils/policyMapper';
 
 interface ClaimItem {
   id: string;
@@ -25,6 +26,8 @@ interface ClaimItem {
   rejected_amount?: number;
   rejection_reason?: string;
   status: string;
+  auto_mapped?: boolean;
+  auto_map_reason?: string;
 }
 
 interface DocumentRequest {
@@ -80,12 +83,13 @@ export default function AgentReviewPage() {
   const [items, setItems] = useState<ClaimItem[]>([]);
   const [documents, setDocuments] = useState<DocumentRequest[]>([]);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
+  const [autoMappingDone, setAutoMappingDone] = useState(false);
 
   useEffect(() => {
-    fetchClaim();
+    fetchAndMapClaim();
   }, [params.id]);
 
-  const fetchClaim = async () => {
+  const fetchAndMapClaim = async () => {
     try {
       const response = await fetch(`/api/claims/${params.id}`);
       const data = await response.json();
@@ -96,15 +100,75 @@ export default function AgentReviewPage() {
 
       setClaim(data.claim);
       
-      // Initialize items with saved approved amounts
-      const initialItems = (data.claim.claim_items || []).map((item: ClaimItem) => ({
-        ...item,
-        approved_amount: item.approved_amount || item.requested_amount,
-        rejected_amount: item.rejected_amount || 0,
-        status: item.status || 'pending'
-      }));
+      // If claim has policyNumber, fetch the policy and auto-map
+      if (data.claim.policyNumber && !autoMappingDone) {
+        try {
+          const policyResponse = await fetch(`/api/policies/${data.claim.policyNumber}`);
+          if (policyResponse.ok) {
+            const policyData = await policyResponse.json();
+            
+            // Auto-map bill items to policy
+            const mappedItems = mapClaimToPolicy(
+              data.claim.claim_items || [],
+              policyData.policy
+            );
+            
+            // Convert mapped items to claim items format
+            const mappedClaimItems = mappedItems.map(mapped => {
+              const originalItem = data.claim.claim_items?.find((i: any) => i.field_name === mapped.fieldName);
+              return {
+                ...originalItem,
+                approved_amount: mapped.suggestedAmount,
+                rejected_amount: (originalItem?.requested_amount || 0) - mapped.suggestedAmount,
+                status: 'pending',
+                auto_mapped: true,
+                auto_map_reason: mapped.reason
+              };
+            });
+            
+            setItems(mappedClaimItems);
+            setAutoMappingDone(true);
+            
+            // Show toast notification about auto-mapping
+            const autoMappedCount = mappedItems.filter(m => m.suggestedAmount < (data.claim.claim_items?.find((i: any) => i.field_name === m.fieldName)?.requested_amount || 0)).length;
+            if (autoMappedCount > 0) {
+              toast.success(`Auto-mapped ${autoMappedCount} items based on policy limits`);
+            }
+          } else {
+            // Policy not found, initialize with requested amounts
+            const initialItems = (data.claim.claim_items || []).map((item: ClaimItem) => ({
+              ...item,
+              approved_amount: item.approved_amount || item.requested_amount,
+              rejected_amount: item.rejected_amount || 0,
+              status: item.status || 'pending'
+            }));
+            
+            setItems(initialItems);
+          }
+        } catch (policyError) {
+          console.error('Error fetching policy:', policyError);
+          // Fallback to requested amounts if policy fetch fails
+          const initialItems = (data.claim.claim_items || []).map((item: ClaimItem) => ({
+            ...item,
+            approved_amount: item.approved_amount || item.requested_amount,
+            rejected_amount: item.rejected_amount || 0,
+            status: item.status || 'pending'
+          }));
+          
+          setItems(initialItems);
+        }
+      } else {
+        // No policy number, initialize with requested amounts
+        const initialItems = (data.claim.claim_items || []).map((item: ClaimItem) => ({
+          ...item,
+          approved_amount: item.approved_amount || item.requested_amount,
+          rejected_amount: item.rejected_amount || 0,
+          status: item.status || 'pending'
+        }));
+        
+        setItems(initialItems);
+      }
       
-      setItems(initialItems);
       setDocuments(data.claim.document_requests || []);
 
       // If there are saved review notes, you might want to load them
@@ -130,7 +194,7 @@ export default function AgentReviewPage() {
       }
 
       toast.success('Document approved');
-      fetchClaim(); // Refresh
+      fetchAndMapClaim(); // Refresh
     } catch (error: any) {
       toast.error(error.message);
     }
@@ -149,7 +213,7 @@ export default function AgentReviewPage() {
       }
 
       toast.success('Document rejected');
-      fetchClaim(); // Refresh
+      fetchAndMapClaim(); // Refresh
     } catch (error: any) {
       toast.error(error.message);
     }
@@ -193,7 +257,7 @@ export default function AgentReviewPage() {
       // Redirect based on action
       if (formData.action === 'request_documents') {
         // Stay on page to show document requests were sent
-        fetchClaim(); // Refresh to show updated status
+        fetchAndMapClaim(); // Refresh to show updated status
       } else {
         // For approve/reject/partial, go back to agent portal
         setTimeout(() => {
@@ -289,6 +353,24 @@ export default function AgentReviewPage() {
           </div>
         </div>
       </header>
+
+      {/* Auto-mapping Banner */}
+      {items.some(item => item.auto_mapped) && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start">
+              <div className="flex-shrink-0">
+                <CheckCircle className="h-5 w-5 text-blue-400" />
+              </div>
+              <div className="ml-3 flex-1">
+                <p className="text-sm text-blue-700">
+                  <span className="font-medium">Auto-mapping applied:</span> Some items have been automatically adjusted based on policy limits. Please review the suggested amounts below.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

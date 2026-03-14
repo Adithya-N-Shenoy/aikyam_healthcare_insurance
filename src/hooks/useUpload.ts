@@ -5,19 +5,16 @@ export function useUpload() {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const uploadFile = async (file: File, bucketType: 'bills' | 'room-photos'): Promise<string> => {
+  const uploadFile = async (file: File, bucketType: 'bills' | 'room-photos' | 'documents'): Promise<string> => {
     setIsUploading(true);
     setError(null);
 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
-      // Map to correct bucket name
-      const bucket = bucketType === 'bills' ? 'bills' : 'room-photos';
-      formData.append('bucket', bucket);
+      formData.append('bucket', bucketType);
 
-      console.log(`Uploading ${file.name} to ${bucket} bucket...`);
+      console.log(`📤 Uploading ${file.name} to ${bucketType}...`);
 
       const response = await fetch('/api/upload', {
         method: 'POST',
@@ -30,7 +27,7 @@ export function useUpload() {
         throw new Error(data.error || 'Upload failed');
       }
 
-      console.log('Upload successful, URL:', data.publicUrl);
+      console.log('✅ Upload successful, URL:', data.publicUrl);
       return data.publicUrl;
 
     } catch (err: any) {
